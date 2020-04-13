@@ -21,7 +21,7 @@ JsonFS is `python` 3.6+
 pip3 install fusepy watchdog
 ```
 
-Furthermore, the FUSE kernel module for Linux is required. On Ubuntu:
+Furthermore, the FUSE kernel module for Linux is required. On Ubuntu this can be done via `apt`:
 ```bash
 sudo apt install fuse
 ```
