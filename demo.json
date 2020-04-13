@@ -1,0 +1,14 @@
+{
+	"Hello" : "World",
+	"list_demo" : [ false, 1, "two", 3.0 ],
+	"I_am_a_bool" : true,
+	"dict_demo" : {
+		"A" : 1,
+		"B" : 2,
+		"C" : 3
+	},
+	"null" : null,
+	"float" : 5.4,
+	"empty_list" : [],
+	"empty_dict" : {}
+}
