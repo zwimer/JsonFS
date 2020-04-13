@@ -9,30 +9,49 @@ import sys
 import os
 
 from fuse import FUSE, FuseOSError, Operations
-from watchdog.observers.fsevents2 import FSEventsObserver2 as Observer
 from watchdog.events import FileSystemEventHandler
+
+def OSX():
+    return 'Darwin' in platform.system()
+def Linux():
+    return 'Linux' in platform.system()
+
+if OSX():
+    from watchdog.observers.fsevents2 import FSEventsObserver2 as Observer
+elif Linux():
+    from watchdog.observers.inotify import InotifyObserver as Observer
+else:
+    assert False, 'Platform not supported'
 
 
 # Watchdog event handler to invoke callback()
 class CallbackHandler(FileSystemEventHandler):
-    def __init__(self, callback):
+    def __init__(self, callback, path):
         self.callback = callback
-    def on_modified(self, _):
+        self.path = path
+        self.linux = Linux()
+    def on_modified(self, event):
         try:
+            if self.linux:
+                if event.src_path != self.path:
+                    return
             self.callback()
         except FileNotFoundError:
             pass
 
 # callback() if the file path is modified and exists
 def watch_file(path, callback):
-    event_handler = CallbackHandler(callback)
+    event_handler = CallbackHandler(callback, path)
     observer = Observer()
+    if Linux():
+        path = os.path.dirname(path)
     observer.schedule(event_handler, path)
     observer.start()
 
 # Fuse class
 class JsonFS(Operations):
     def __init__(self, fname, watch):
+        self.osx = OSX()
         self.load_json(fname)
         assert self.valid, 'Failed to load json'
         if watch:
@@ -202,8 +221,10 @@ class JsonFS(Operations):
     # ============
 
     def open(self, path, flags):
-        illegal = [ os.O_WRONLY, os.O_RDWR, os.O_APPEND, os.O_CREAT,
-                    os.O_TRUNC, os.O_EXCL, os.O_SHLOCK, os.O_EXLOCK ]
+        illegal = [ os.O_WRONLY, os.O_RDWR, os.O_APPEND,
+                    os.O_CREAT, os.O_TRUNC, os.O_EXCL ]
+        if self.osx:
+               illegal.extend([ os.O_SHLOCK, os.O_EXLOCK ])
         if any(flags == (flags | m) for m in illegal):
             raise errno.EROFS
         self.verify_exists(path)
@@ -236,7 +257,6 @@ class JsonFS(Operations):
 
 # Main function
 def main(json, mountpoint, watch, **kwargs):
-    assert 'Darwin' in platform.platform()
     # Argument verification
     fname = os.path.realpath(json)
     assert os.path.exists(fname), fname + ' does not exist'
@@ -244,8 +264,9 @@ def main(json, mountpoint, watch, **kwargs):
     if watch:
         assert kwargs['foreground'], 'watch required --foreground'
     # Default volname
-    if kwargs['volname'] is None:
-        kwargs['volname'] = os.path.basename(mountpoint)
+    if OSX():
+        if kwargs['volname'] is None:
+            kwargs['volname'] = os.path.basename(mountpoint)
     # Invoke fuse
     FUSE(JsonFS(fname, watch), mountpoint, **kwargs)
 
@@ -257,7 +278,8 @@ def parse_args(prog, *args):
     parser.add_argument('--nothreads', action='store_true', default=False)
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--watch', action='store_true', default=False, help='Update FS when json changes')
-    parser.add_argument('--volname', action='store', default=None)
+    if OSX():
+        parser.add_argument('--volname', action='store', default=None)
     parser.add_argument('json')
     parser.add_argument('mountpoint')
     return parser.parse_args(args)
