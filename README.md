@@ -12,6 +12,8 @@ See the `-h` or `--help` flag for more details
 
 ## Requirements
 
+JsonFS is `python` 3.6+
+
 ### Linux
 
  `fusepy`, and `watchdog` are required.
