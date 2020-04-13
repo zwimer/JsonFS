@@ -90,6 +90,7 @@ class JsonFS(Operations):
             fdata[os.statvfs] = os.statvfs(fname)
         except FileNotFoundError:
             self.valid = False
+            return
         # Load settings
         self.fname = fname
         self.fdata = fdata
