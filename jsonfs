@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+
+import argparse
+import platform
+import errno
+import time
+import json
+import sys
+import os
+
+from fuse import FUSE, FuseOSError, Operations
+from watchdog.observers.fsevents2 import FSEventsObserver2 as Observer
+from watchdog.events import FileSystemEventHandler
+
+
+# Watchdog event handler to invoke callback()
+class CallbackHandler(FileSystemEventHandler):
+    def __init__(self, callback):
+        self.callback = callback
+    def on_modified(self, _):
+        try:
+            self.callback()
+        except FileNotFoundError:
+            pass
+
+# callback() if the file path is modified and exists
+def watch_file(path, callback):
+    event_handler = CallbackHandler(callback)
+    observer = Observer()
+    observer.schedule(event_handler, path)
+    observer.start()
+
+# Fuse class
+class JsonFS(Operations):
+    def __init__(self, fname, watch):
+        self.load_json(fname)
+        assert self.valid, 'Failed to load json'
+        if watch:
+            watch_file(self.fname, self.reload_json)
+
+    # Helpers
+    # ==================
+
+    # Return most recent valid stat(self.fname)
+    def info(self, fn):
+        if self.valid:
+            try:
+                self.fdata[fn] = fn(self.fname)
+            except FileNotFoundError:
+                pass
+        return self.fdata[fn]
+
+    # Load the json fname
+    def load_json(self, fname):
+        # Try to load the json
+        with open(fname) as f:
+            data = f.read()
+        try:
+            js = json.loads(data)
+        except:
+            self.valid = False
+            return
+        # Error checking
+        if not self.is_dir(js):
+            self.valid = False
+            return
+        # Try to load fname info
+        fdata = {}
+        try:
+            fdata[os.stat] = os.stat(fname)
+            fdata[os.statvfs] = os.statvfs(fname)
+        except FileNotFoundError:
+            self.valid = False
+        # Load settings
+        self.fname = fname
+        self.fdata = fdata
+        self.valid = True
+        self.js = js
+
+    def reload_json(self):
+        self.load_json(self.fname)
+
+    # Standardized conversion of a json to a string
+    @staticmethod
+    def to_str(js):
+        return json.dumps(js)
+
+    # Should json x be represented as an fs dir
+    @staticmethod
+    def is_dir(x):
+        return type(x) in [dict, list]
+
+    # Convert json s to a list index if it is valid
+    @staticmethod
+    def to_index(s):
+        assert not any(i in s for i in ['.', '-'])
+        ret = int(s)
+        assert len(s) == len(str(ret))
+        return ret
+
+    # Follow a fs path through the json
+    def follow_path(self, path, root=None):
+        # Default args
+        if root is None:
+            root = self.js
+        # Base case
+        if path == '/':
+            if not self.is_dir(root):
+                return self.to_str(root)
+            return root
+        try:
+            # Parse path
+            items = path.split('/')
+            assert items[0] == ''
+            left = items[1]
+            right = path[1 + len(left):]
+            if type(root) is list:
+                left = self.to_index(left)
+            # Return obj
+            val = root[left]
+            if len(right) == 0:
+                return val
+            assert self.is_dir(val)
+            return self.follow_path(right, root=val)
+        except:
+            raise FuseOSError(errno.ENOENT)
+
+    # Raise an error if path does not exist
+    def verify_exists(self, path):
+        _ = self.follow_path(path)
+
+    # Filesystem methods
+    # ==================
+
+    def access(self, path, mode):
+        # Read only
+        if mode is os.W_OK:
+            raise FuseOSError(errno.EACCES)
+        # Check if path exists
+        obj = self.follow_path(path)
+        # Allow X only for directories
+        if mode is os.X_OK and not self.is_dir(obj):
+            raise FuseOSError(errno.EACCES)
+
+    def chmod(self, path, mode):
+        return errno.EROFS
+
+    def chown(self, path, uid, gid):
+        return errno.EROFS
+
+    def getattr(self, path, fh=None):
+        st = self.info(os.stat)
+        ret = { key:getattr(st, key) for key in ['st_atime', 'st_ctime',
+            'st_gid', 'st_mtime', 'st_nlink', 'st_uid'] }
+        obj = self.follow_path(path)
+        ret['st_size'] = len(self.to_str(obj))
+        ret['st_mode'] = 0o40444  if self.is_dir(obj) else 0o100444
+        return ret
+
+    def readdir(self, path, fh):
+        dirents = ['.', '..']
+        d = self.follow_path(path)
+        if self.is_dir(d):
+            if type(d) is list:
+                d = [ str(i) for i in range(len(d)) ]
+            dirents.extend(d)
+        for r in dirents:
+            yield r
+
+    def readlink(self, path):
+        return errno.EINVAL
+
+    def mknod(self, path, mode, dev):
+        return errno.EROFS
+
+    def rmdir(self, path):
+        return errno.EROFS
+
+    def mkdir(self, path, mode):
+        return errno.EROFS
+
+    def statfs(self, path):
+        self.verify_exists(path)
+        stv = self.info(os.statvfs)
+        return dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree',
+            'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag',
+            'f_frsize', 'f_namemax'))
+
+    def unlink(self, path):
+        return errno.EROFS
+
+    def rename(self, old, new):
+        return errno.EROFS
+
+    def link(self, target, name):
+        return errno.EROFS
+
+    def utimens(self, path, times=None):
+        return errno.EROFS
+
+    # File methods
+    # ============
+
+    def open(self, path, flags):
+        illegal = [ os.O_WRONLY, os.O_RDWR, os.O_APPEND, os.O_CREAT,
+                    os.O_TRUNC, os.O_EXCL, os.O_SHLOCK, os.O_EXLOCK ]
+        if any(flags == (flags | m) for m in illegal):
+            raise errno.EROFS
+        self.verify_exists(path)
+        return 0
+
+    def create(self, path, mode, fi=None):
+        return errno.EROFS
+
+    def read(self, path, length, offset, fh):
+        obj = self.follow_path(path)
+        assert not self.is_dir(obj)
+        ret = self.to_str(obj)[offset:offset+length]
+        return bytes(ret, 'utf-8')
+
+    def write(self, path, buf, offset, fh):
+        return errno.EROFS
+
+    def truncate(self, path, length, fh=None):
+        return errno.EROFS
+
+    def flush(self, path, fh):
+        pass
+
+    def release(self, path, fh):
+        pass
+
+    def fsync(self, path, fdatasync, fh):
+        pass
+
+
+# Main function
+def main(json, mountpoint, watch, **kwargs):
+    assert 'Darwin' in platform.platform()
+    # Argument verification
+    fname = os.path.realpath(json)
+    assert os.path.exists(fname), fname + ' does not exist'
+    assert os.path.isfile(fname), fname + ' is not a file'
+    if watch:
+        assert kwargs['foreground'], 'watch required --foreground'
+    # Default volname
+    if kwargs['volname'] is None:
+        kwargs['volname'] = os.path.basename(mountpoint)
+    # Invoke fuse
+    FUSE(JsonFS(fname, watch), mountpoint, **kwargs)
+
+# Argument parsing
+def parse_args(prog, *args):
+    parser = argparse.ArgumentParser(prog=os.path.basename(prog))
+    parser.add_argument('--allow_other', action='store_true', default=False)
+    parser.add_argument('--foreground', action='store_true', default=False)
+    parser.add_argument('--nothreads', action='store_true', default=False)
+    parser.add_argument('--debug', action='store_true', default=False)
+    parser.add_argument('--watch', action='store_true', default=False, help='Update FS when json changes')
+    parser.add_argument('--volname', action='store', default=None)
+    parser.add_argument('json')
+    parser.add_argument('mountpoint')
+    return parser.parse_args(args)
+
+
+# Don't run on imports
+if __name__ == '__main__':
+    main(**vars(parse_args(*sys.argv)))
