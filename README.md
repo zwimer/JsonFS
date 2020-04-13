@@ -1,6 +1,6 @@
 # JsonFS
 
-A FUSE that mounts a json as a file system
+A multi-plaform FUSE that mounts a json as a file system that works on both Linux and OSX.
 
 ## Usage
 
@@ -18,10 +18,10 @@ JsonFS is `python` 3.6+
 
  `fusepy`, and `watchdog` are required.
 ```bash
-pip install fusepy watchdog
+pip3 install fusepy watchdog
 ```
 
-Furthermore, the FUSE kernel module for Linux is required.
+Furthermore, the FUSE kernel module for Linux is required. On Ubuntu:
 ```bash
 sudo apt install fuse
 ```
@@ -30,7 +30,7 @@ sudo apt install fuse
 
 For OSX: `fusepy`, `pyobjc`, and `watchdog` are required.
 ```bash
-pip install fusepy pyobjc watchdog
+pip3 install fusepy pyobjc watchdog
 ```
 
 Furthermore, the FUSE kernel module for OSX is required.
