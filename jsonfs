@@ -180,10 +180,9 @@ class JsonFS(Operations):
     def readdir(self, path, fh):
         dirents = ['.', '..']
         d = self.follow_path(path)
-        if self.is_dir(d):
-            if type(d) is list:
-                d = [ str(i) for i in range(len(d)) ]
-            dirents.extend(d)
+        if type(d) is list:
+            d = [ str(i) for i in range(len(d)) ]
+        dirents.extend(d)
         for r in dirents:
             yield r
 
