@@ -273,6 +273,10 @@ def main(json, mountpoint, watch, **kwargs):
 # Argument parsing
 def parse_args(prog, *args):
     parser = argparse.ArgumentParser(prog=os.path.basename(prog))
+    parser.add_argument('--watch', action='store_true', default=False,
+        help='Update FS when json changes. Requires --foreground')
+    parser.add_argument('json', help='The json to mount as a filesystem')
+    parser.add_argument('mountpoint', help='Where to mount the FS')
     fuse = parser.add_argument_group('optional fuse arguments')
     fuse.add_argument('--allow_other', action='store_true', default=False,
         help='This option overrides the security measure restricting file access to ' + \
@@ -283,12 +287,9 @@ def parse_args(prog, *args):
         help='Promise that only one thread will ever use the json FS')
     fuse.add_argument('--debug', action='store_true', default=False,
         help='Show every interaction with the json FS')
-    parser.add_argument('--watch', action='store_true', default=False,
-        help='Update FS when json changes. Requires --foreground')
     if OSX():
-        parser.add_argument('--volname', action='store', default=None, help='Mac volume name')
-    parser.add_argument('json', help='The json to mount as a filesystem')
-    parser.add_argument('mountpoint', help='Where to mount the FS')
+        fuse.add_argument('--volname', action='store', default=None,
+            help='Mac volume name. Default = <mountpoint>')
     return parser.parse_args(args)
 
 
