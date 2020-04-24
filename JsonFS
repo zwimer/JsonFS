@@ -208,6 +208,9 @@ class JsonFS(Operations):
     def unlink(self, path):
         return errno.EROFS
 
+    def symlink(self, name, path):
+        return errno.EROFS
+
     def rename(self, old, new):
         return errno.EROFS
 
